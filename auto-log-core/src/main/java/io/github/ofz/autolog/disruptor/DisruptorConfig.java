@@ -8,6 +8,7 @@ import com.lmax.disruptor.WaitStrategy;
 import com.lmax.disruptor.YieldingWaitStrategy;
 import com.lmax.disruptor.dsl.Disruptor;
 import com.lmax.disruptor.dsl.ProducerType;
+import io.github.ofz.autolog.context.LogContextPool;
 import io.github.ofz.autolog.formatter.LogFormatter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,7 +35,8 @@ public class DisruptorConfig {
                            ProducerType producerType,
                            WaitStrategy waitStrategy,
                            String threadNamePrefix,
-                           LogFormatter formatter) {
+                           LogFormatter formatter,
+                           LogContextPool pool) {
         EventFactory<LogEvent> eventFactory = new LogEventFactory();
         ThreadFactory threadFactory = r -> {
             Thread t = new Thread(r);
@@ -42,7 +44,7 @@ public class DisruptorConfig {
             t.setDaemon(true);
             return t;
         };
-
+        
         this.disruptor = new Disruptor<>(
                 eventFactory,
                 ringBufferSize,
@@ -52,7 +54,7 @@ public class DisruptorConfig {
         );
 
         // Single handler — ordered log consumption
-        LogEventHandler handler = new LogEventHandler(formatter);
+        LogEventHandler handler = new LogEventHandler(formatter, pool);
         disruptor.handleEventsWith(handler);
 
         disruptor.start();

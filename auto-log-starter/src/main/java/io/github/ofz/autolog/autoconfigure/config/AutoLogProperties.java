@@ -58,6 +58,20 @@ public class AutoLogProperties {
      */
     private String level = "INFO";
 
+    /**
+     * Comma-separated list of additional parameter name keywords to treat as
+     * sensitive. Parameters whose names contain any of these keywords (after
+     * normalisation to lower case and stripping underscores/hyphens) will
+     * have their values masked as {@code ***} in log output, while the
+     * parameter name itself is still shown.
+     *
+     * <p>Built-in keywords ({@code password}, {@code token}, {@code secret},
+     * etc.) are always active; this property only adds to that list.
+     *
+     * <p>Example: {@code sensitive-keywords: ssn,creditCard,phoneNumber}
+     */
+    private String sensitiveKeywords = "";
+
     // ---- Getters and Setters ----
 
     public boolean isEnabled() {
@@ -106,5 +120,13 @@ public class AutoLogProperties {
 
     public void setLevel(String level) {
         this.level = level;
+    }
+
+    public String getSensitiveKeywords() {
+        return sensitiveKeywords;
+    }
+
+    public void setSensitiveKeywords(String sensitiveKeywords) {
+        this.sensitiveKeywords = sensitiveKeywords;
     }
 }

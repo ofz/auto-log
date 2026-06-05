@@ -5,13 +5,17 @@ import io.github.ofz.autolog.aspect.AutoLogAspect;
 import io.github.ofz.autolog.context.LogContext;
 import io.github.ofz.autolog.disruptor.LogEventProducer;
 import io.github.ofz.autolog.formatter.DefaultLogFormatter;
+import io.github.ofz.autolog.provider.DefaultSensitiveDataFilter;
 import io.github.ofz.autolog.provider.DefaultTraceIdProvider;
+import io.github.ofz.autolog.provider.SensitiveDataFilter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 
 import java.lang.reflect.Method;
+import java.util.Collections;
+import java.util.HashSet;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -132,7 +136,7 @@ class AutoLogAspectTest {
         String message = formatter.format(ctx);
 
         assertTrue(message.contains("username=admin"));
-        assertTrue(message.contains("password=secret123"));
+        assertTrue(message.contains("password=***"));
         assertTrue(message.contains("SUCCESS"));
         assertTrue(message.contains("ms"));
     }
@@ -220,7 +224,7 @@ class AutoLogAspectTest {
 
         assertFalse(message.contains("ctx="));
         assertTrue(message.contains("username=admin"));
-        assertTrue(message.contains("token=tok123"));
+        assertTrue(message.contains("token=***"));
     }
 
     @Test
@@ -297,6 +301,100 @@ class AutoLogAspectTest {
                     true, true, true, true, "INFO", "");
             ctx.markSuccess("ok");
         });
+    }
+
+    // ---- Sensitive data filter tests ----
+
+    @Test
+    void testSensitiveDataMasked() throws NoSuchMethodException {
+        Method method = TestService.class.getMethod("login", String.class, String.class);
+        LogContext ctx = buildCtx(TestService.class, method,
+                new Object[]{"admin", "secret123"},
+                true, true, true, true, "INFO", "");
+
+        DefaultLogFormatter formatter = new DefaultLogFormatter();
+        String message = formatter.format(ctx);
+
+        // "password" is in built-in keywords — value masked, name shown
+        assertTrue(message.contains("password=***"));
+        // "username" is not sensitive — value shown
+        assertTrue(message.contains("username=admin"));
+        assertFalse(message.contains("password=secret123"));
+    }
+
+    @Test
+    void testSensitiveDataWithCustomFilter() throws NoSuchMethodException {
+        Method method = TestService.class.getMethod("login", String.class, String.class);
+        LogContext ctx = buildCtx(TestService.class, method,
+                new Object[]{"admin", "secret123"},
+                true, true, true, true, "INFO", "");
+
+        // Custom filter: only mask "username", not "password"
+        SensitiveDataFilter customFilter = (paramName, value, m) ->
+                "username".equals(paramName);
+        DefaultLogFormatter formatter = new DefaultLogFormatter(customFilter);
+        String message = formatter.format(ctx);
+
+        assertTrue(message.contains("username=***"));
+        assertTrue(message.contains("password=secret123"));
+    }
+
+    @Test
+    void testSensitiveDataWithExtraKeywords() throws NoSuchMethodException {
+        Method method = TestService.class.getMethod("login", String.class, String.class);
+        LogContext ctx = buildCtx(TestService.class, method,
+                new Object[]{"admin", "secret123"},
+                true, true, true, true, "INFO", "");
+
+        // Add "username" as extra sensitive keyword
+        DefaultSensitiveDataFilter filter = new DefaultSensitiveDataFilter(
+                new HashSet<>(Collections.singletonList("username")));
+        DefaultLogFormatter formatter = new DefaultLogFormatter(filter);
+        String message = formatter.format(ctx);
+
+        // Both "password" (built-in) and "username" (extra) are masked
+        assertTrue(message.contains("password=***"));
+        assertTrue(message.contains("username=***"));
+    }
+
+    @Test
+    void testNonSensitiveParamsUnaffected() throws NoSuchMethodException {
+        Method method = TestService.class.getMethod("greet", String.class);
+        LogContext ctx = buildCtx(TestService.class, method,
+                new Object[]{"World"},
+                true, true, true, true, "INFO", "");
+        ctx.markSuccess("Hello World");
+
+        DefaultLogFormatter formatter = new DefaultLogFormatter();
+        String message = formatter.format(ctx);
+
+        // "name" is not sensitive — should appear normally
+        assertTrue(message.contains("name=World"));
+        assertFalse(message.contains("***"));
+    }
+
+    @Test
+    void testZeroCopyTemplateRendering() throws NoSuchMethodException {
+        // Verify the zero-copy engine renders the same output as expected
+        // for all standard placeholders
+        Method method = TestService.class.getMethod("greet", String.class);
+        LogContext ctx = buildCtx(TestService.class, method,
+                new Object[]{"World"},
+                true, true, true, true, "INFO", "");
+        ctx.markSuccess("Hello World");
+
+        DefaultLogFormatter formatter = new DefaultLogFormatter();
+        String message = formatter.format(ctx);
+
+        // All standard placeholders should be resolved
+        assertTrue(message.contains(TestService.class.getName()));
+        assertTrue(message.contains("greet"));
+        assertTrue(message.contains("SUCCESS"));
+        assertTrue(message.contains("ms"));
+        assertTrue(message.contains("admin"));   // operator
+        assertTrue(message.contains("abc123def456")); // traceId
+        assertTrue(message.contains("name=World"));
+        assertTrue(message.contains("Hello World"));
     }
 
     // ---- Class-level @AutoLog tests ----

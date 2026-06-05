@@ -11,39 +11,49 @@ import java.util.Map;
  * Holds all contextual information for a single auto-logged method invocation.
  * This is the data transfer object that flows through the Disruptor ring buffer.
  *
+ * <p>Instances are pooled via {@link LogContextPool} to reduce allocation pressure
+ * and lower Young GC frequency. After consumption, callers should return the
+ * instance to the pool rather than dropping it for GC.
+ *
  * @author ofz
  */
 public class LogContext {
 
+    /** Shared empty array to avoid allocation in {@link #clearReferences()} and {@link #reset()}. */
+    private static final Object[] EMPTY_ARGS = new Object[0];
+
+    /** Shared empty array for excludeTypes. */
+    private static final Class<?>[] EMPTY_EXCLUDE_TYPES = new Class<?>[0];
+
     /** Fully qualified class name where the annotated method resides. */
-    private final String className;
+    private String className;
 
     /** Method name. */
-    private final String methodName;
+    private String methodName;
 
     /** The java.lang.reflect.Method object. */
-    private final Method method;
+    private Method method;
 
     /** Method arguments as an array (may be empty). */
-    private final Object[] args;
+    private Object[] args;
 
     /** Whether to log method arguments. */
-    private final boolean logArgs;
+    private boolean logArgs;
 
     /** Whether to log return value. */
-    private final boolean logResult;
+    private boolean logResult;
 
     /** Whether to log execution time. */
-    private final boolean logTime;
+    private boolean logTime;
 
     /** Whether to log exception details. */
-    private final boolean logException;
+    private boolean logException;
 
     /** Log level string (TRACE/DEBUG/INFO/WARN/ERROR). */
-    private final String level;
+    private String level;
 
     /** Custom message template from @AutoLog value(). */
-    private final String messageTemplate;
+    private String messageTemplate;
 
     /** Execution start timestamp. */
     private Instant startTime;
@@ -61,16 +71,33 @@ public class LogContext {
     private ExecutionStatus status;
 
     /** Argument types to exclude from logging (from @AutoLog.excludeTypes). */
-    private final Class<?>[] excludeTypes;
+    private Class<?>[] excludeTypes;
 
     /** Current operator (user) identifier, resolved via {@code OperatorProvider}. */
-    private final String operator;
+    private String operator;
 
     /** Trace ID for distributed tracing, resolved via {@code TraceIdProvider}. */
-    private final String traceId;
+    private String traceId;
 
-    /** Extra attributes for custom formatters. */
-    private final Map<String, Object> attributes = new LinkedHashMap<>();
+    /**
+     * Extra attributes for custom formatters. Lazily initialised on first
+     * call to {@link #addAttribute} — the vast majority of invocations
+     * never use this, so we avoid allocating a Map per pooled instance.
+     */
+    private Map<String, Object> attributes;
+
+    /**
+     * No-arg constructor for pool pre-allocation.
+     * Creates an empty context with safe defaults; call {@link #reset} before use.
+     */
+    public LogContext() {
+        this.args = EMPTY_ARGS;
+        this.excludeTypes = EMPTY_EXCLUDE_TYPES;
+        this.operator = "system";
+        this.traceId = "";
+        this.level = "INFO";
+        this.status = ExecutionStatus.RUNNING;
+    }
 
     /**
      * Creates a new LogContext with pre-execution data.
@@ -79,20 +106,65 @@ public class LogContext {
                       boolean logArgs, boolean logResult, boolean logTime,
                       boolean logException, String level, String messageTemplate,
                       Class<?>[] excludeTypes, String operator, String traceId) {
+        reset(className, methodName, method, args,
+                logArgs, logResult, logTime, logException,
+                level, messageTemplate, excludeTypes, operator, traceId);
+    }
+
+    /**
+     * Resets all fields for reuse from the object pool.
+     * This avoids the allocation cost of creating a new LogContext for every invocation.
+     */
+    public void reset(String className, String methodName, Method method, Object[] args,
+                      boolean logArgs, boolean logResult, boolean logTime,
+                      boolean logException, String level, String messageTemplate,
+                      Class<?>[] excludeTypes, String operator, String traceId) {
         this.className = className;
         this.methodName = methodName;
         this.method = method;
-        this.args = args != null ? args.clone() : new Object[0];
+        this.args = args != null ? args.clone() : EMPTY_ARGS;
         this.logArgs = logArgs;
         this.logResult = logResult;
         this.logTime = logTime;
         this.logException = logException;
         this.level = level;
         this.messageTemplate = messageTemplate;
-        this.excludeTypes = excludeTypes != null ? excludeTypes.clone() : new Class<?>[0];
+        this.excludeTypes = excludeTypes != null ? excludeTypes.clone() : EMPTY_EXCLUDE_TYPES;
         this.operator = operator != null ? operator : "system";
         this.traceId = traceId != null ? traceId : "";
         this.startTime = Instant.now();
+        this.status = ExecutionStatus.RUNNING;
+        this.endTime = null;
+        this.result = null;
+        this.exception = null;
+        if (attributes != null) {
+            attributes.clear();
+        }
+    }
+
+    /**
+     * Clears all reference-type fields to prevent memory leaks when a
+     * LogContext is returned to the object pool. This ensures that
+     * method arguments, results, exceptions, and other objects
+     * referenced by this context are eligible for GC even while
+     * this instance sits idle in the pool.
+     */
+    public void clearReferences() {
+        this.className = null;
+        this.methodName = null;
+        this.method = null;
+        this.args = EMPTY_ARGS;
+        this.messageTemplate = null;
+        this.startTime = null;
+        this.endTime = null;
+        this.result = null;
+        this.exception = null;
+        this.excludeTypes = EMPTY_EXCLUDE_TYPES;
+        this.operator = "system";
+        this.traceId = "";
+        if (attributes != null) {
+            attributes.clear();
+        }
         this.status = ExecutionStatus.RUNNING;
     }
 
@@ -126,15 +198,23 @@ public class LogContext {
 
     /**
      * Adds an extra attribute for custom formatting.
+     * The underlying map is created lazily on first use.
      */
     public void addAttribute(String key, Object value) {
-        this.attributes.put(key, value);
+        if (attributes == null) {
+            attributes = new LinkedHashMap<>();
+        }
+        attributes.put(key, value);
     }
 
     /**
-     * Returns an unmodifiable view of extra attributes.
+     * Returns an unmodifiable view of extra attributes, or an empty map
+     * if no attributes have been added (lazy-init, zero allocation).
      */
     public Map<String, Object> getAttributes() {
+        if (attributes == null) {
+            return Collections.emptyMap();
+        }
         return Collections.unmodifiableMap(attributes);
     }
 

@@ -2,6 +2,7 @@ package io.github.ofz.autolog.disruptor;
 
 import com.lmax.disruptor.EventHandler;
 import io.github.ofz.autolog.context.LogContext;
+import io.github.ofz.autolog.context.LogContextPool;
 import io.github.ofz.autolog.formatter.LogFormatter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,14 +15,19 @@ import org.slf4j.LoggerFactory;
  * <p>This handler runs on the Disruptor's dedicated thread(s), keeping logging I/O
  * off the application threads.
  *
+ * <p>After processing, the {@link LogContext} is returned to the {@link LogContextPool}
+ * for reuse, reducing allocation pressure and Young GC frequency.
+ *
  * @author ofz
  */
 public class LogEventHandler implements EventHandler<LogEvent> {
 
     private final LogFormatter formatter;
+    private final LogContextPool pool;
 
-    public LogEventHandler(LogFormatter formatter) {
+    public LogEventHandler(LogFormatter formatter, LogContextPool pool) {
         this.formatter = formatter;
+        this.pool = pool;
     }
 
     @Override
@@ -67,6 +73,7 @@ public class LogEventHandler implements EventHandler<LogEvent> {
                     .error("Failed to process AutoLog event: {}", e.getMessage(), e);
         } finally {
             event.clear();
+            pool.release(ctx);
         }
     }
 }
