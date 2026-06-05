@@ -1,0 +1,81 @@
+{
+  "groups": [
+    {
+      "name": "auto.log",
+      "type": "io.github.ofz.autolog.autoconfigure.config.AutoLogProperties",
+      "sourceType": "io.github.ofz.autolog.autoconfigure.config.AutoLogProperties"
+    }
+  ],
+  "properties": [
+    {
+      "name": "auto.log.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether to enable auto-logging.",
+      "sourceType": "io.github.ofz.autolog.autoconfigure.config.AutoLogProperties",
+      "defaultValue": true
+    },
+    {
+      "name": "auto.log.ring-buffer-size",
+      "type": "java.lang.Integer",
+      "description": "Ring buffer size, must be a power of 2. Rounded up if not.",
+      "sourceType": "io.github.ofz.autolog.autoconfigure.config.AutoLogProperties",
+      "defaultValue": 1024
+    },
+    {
+      "name": "auto.log.wait-strategy",
+      "type": "java.lang.String",
+      "description": "Disruptor wait strategy (BLOCKING, SLEEPING, YIELDING, BUSY_SPIN).",
+      "sourceType": "io.github.ofz.autolog.autoconfigure.config.AutoLogProperties",
+      "defaultValue": "BLOCKING"
+    },
+    {
+      "name": "auto.log.producer-type",
+      "type": "java.lang.String",
+      "description": "Disruptor producer type (SINGLE or MULTI).",
+      "sourceType": "io.github.ofz.autolog.autoconfigure.config.AutoLogProperties",
+      "defaultValue": "MULTI"
+    },
+    {
+      "name": "auto.log.thread-name-prefix",
+      "type": "java.lang.String",
+      "description": "Thread name prefix for Disruptor worker threads.",
+      "sourceType": "io.github.ofz.autolog.autoconfigure.config.AutoLogProperties",
+      "defaultValue": "autolog-disruptor-"
+    },
+    {
+      "name": "auto.log.level",
+      "type": "java.lang.String",
+      "description": "Default log level (TRACE, DEBUG, INFO, WARN, ERROR).",
+      "sourceType": "io.github.ofz.autolog.autoconfigure.config.AutoLogProperties",
+      "defaultValue": "INFO"
+    }
+  ],
+  "hints": [
+    {
+      "name": "auto.log.wait-strategy",
+      "values": [
+        {"value": "BLOCKING", "description": "Uses a lock. Low CPU usage, good for general use."},
+        {"value": "SLEEPING", "description": "Spins then yields. Good balance of latency and CPU."},
+        {"value": "YIELDING", "description": "Spins constantly. Higher CPU, lower latency."},
+        {"value": "BUSY_SPIN", "description": "Spins without yielding. Lowest latency, highest CPU."}
+      ]
+    },
+    {
+      "name": "auto.log.producer-type",
+      "values": [
+        {"value": "SINGLE", "description": "Single producer. Faster but only one thread can publish."},
+        {"value": "MULTI", "description": "Multiple producers. Thread-safe for concurrent use."}
+      ]
+    },
+    {
+      "name": "auto.log.level",
+      "values": [
+        {"value": "TRACE"},
+        {"value": "DEBUG"},
+        {"value": "INFO"},
+        {"value": "WARN"},
+        {"value": "ERROR"}
+      ]
+    }
+  ]
+}
