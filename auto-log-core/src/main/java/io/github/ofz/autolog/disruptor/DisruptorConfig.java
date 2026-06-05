@@ -14,6 +14,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Configuration and lifecycle management for the LMAX Disruptor instance
@@ -30,6 +32,7 @@ public class DisruptorConfig {
 
     private final Disruptor<LogEvent> disruptor;
     private final LogEventProducer producer;
+    private final AtomicBoolean running = new AtomicBoolean(true);
 
     public DisruptorConfig(int ringBufferSize,
                            ProducerType producerType,
@@ -62,7 +65,7 @@ public class DisruptorConfig {
                 ringBufferSize, producerType, waitStrategy.getClass().getSimpleName());
 
         this.producer = new LogEventProducer(disruptor.getRingBuffer(),
-                producerType == ProducerType.SINGLE);
+                producerType == ProducerType.SINGLE, running);
     }
 
     /**
@@ -73,12 +76,25 @@ public class DisruptorConfig {
     }
 
     /**
-     * Gracefully shuts down the Disruptor, waiting for pending events to be processed.
+     * Gracefully shuts down the Disruptor:
+     * <ol>
+     *   <li>Signals producers to stop accepting new events</li>
+     *   <li>Waits up to 10 seconds for the consumer to drain pending events</li>
+     *   <li>Falls back to {@link #halt()} on timeout to prevent thread leaks</li>
+     * </ol>
      */
     public void shutdown() {
         log.info("Shutting down AutoLog Disruptor...");
-        disruptor.shutdown();
-        log.info("AutoLog Disruptor shut down complete.");
+        running.set(false);
+
+        try {
+            disruptor.shutdown(10, TimeUnit.SECONDS);
+            log.info("AutoLog Disruptor shut down complete.");
+        } catch (Exception e) {
+            log.warn("AutoLog Disruptor graceful shutdown timed out ({}), forcing halt", e.getMessage());
+            disruptor.halt();
+            log.info("AutoLog Disruptor halted.");
+        }
     }
 
     /**

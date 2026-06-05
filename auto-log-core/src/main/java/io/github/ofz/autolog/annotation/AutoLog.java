@@ -105,4 +105,47 @@ public @interface AutoLog {
      * <p>Example: {@code excludeTypes = {HttpServletRequest.class, HttpServletResponse.class}}
      */
     Class<?>[] excludeTypes() default {};
+
+    /**
+     * SpEL expression that determines whether this invocation should be logged.
+     * Evaluated after method execution; the evaluation context provides:
+     * <ul>
+     *   <li>Method parameters by name (e.g. {@code #username}, {@code #id})</li>
+     *   <li>{@code #result} — the return value ({@code null} for void / on exception)</li>
+     *   <li>{@code #exception} — the thrown exception ({@code null} on success)</li>
+     * </ul>
+     * The expression must evaluate to a {@code boolean}. If {@code false},
+     * the log event is discarded (the {@code LogContext} is returned to the pool
+     * without publishing).
+     *
+     * <p>Examples:
+     * <pre>{@code
+     * // Only log when the result is non-null
+     * @AutoLog(condition = "#result != null")
+     *
+     * // Skip logging for the admin user
+     * @AutoLog(condition = "#username != 'admin'")
+     *
+     * // Only log failed invocations
+     * @AutoLog(condition = "#exception != null")
+     * }</pre>
+     *
+     * <p>Defaults to {@code "true"} (always log). If evaluation fails the
+     * invocation is logged as a safety measure.
+     */
+    String condition() default "true";
+
+    /**
+     * Method parameter names whose values should be masked in log output.
+     * Parameters listed here have their values replaced with {@code ***}
+     * while the parameter name itself is still shown.
+     *
+     * <p>Works in conjunction with the global {@link io.github.ofz.autolog.provider.SensitiveDataFilter}
+     * SPI — both the annotation-level names and the filter's keyword matches
+     * are applied. Use this for method-specific overrides when the global
+     * keyword list is insufficient.
+     *
+     * <p>Example: {@code sensitiveParams = {"creditCard", "ssn"}}
+     */
+    String[] sensitiveParams() default {};
 }

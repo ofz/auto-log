@@ -6,6 +6,7 @@ import io.github.ofz.autolog.provider.SensitiveDataFilter;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
+import java.util.Arrays;
 
 /**
  * Default {@link LogFormatter} implementation.
@@ -33,6 +34,12 @@ public class DefaultLogFormatter implements LogFormatter {
             "[AutoLog] {operator} | {traceId} | {class}#{method} | {status} | {time}ms | args={args} | result={result}";
 
     private static final String MASKED_VALUE = "***";
+
+    /** Maximum length of a single argument's {@code toString()} output before truncation. */
+    private static final int MAX_ARG_LENGTH = 200;
+
+    /** Maximum length of the result's {@code toString()} output before truncation. */
+    private static final int MAX_RESULT_LENGTH = 500;
 
     private final SensitiveDataFilter sensitiveFilter;
 
@@ -169,10 +176,10 @@ public class DefaultLogFormatter implements LogFormatter {
             }
             String paramName = i < paramNames.length ? paramNames[i] : "arg" + i;
             sb.append(paramName).append('=');
-            if (sensitiveFilter.isSensitive(paramName, args[i], context.getMethod())) {
+            if (isSensitive(paramName, args[i], context)) {
                 sb.append(MASKED_VALUE);
             } else {
-                sb.append(args[i]);
+                appendSafeString(sb, args[i], MAX_ARG_LENGTH);
             }
             first = false;
         }
@@ -189,16 +196,79 @@ public class DefaultLogFormatter implements LogFormatter {
      * {@code StringBuilder} rather than string concatenation.
      */
     protected void formatResult(StringBuilder sb, Object result) {
-        if (result == null) {
+        appendSafeString(sb, result, MAX_RESULT_LENGTH);
+    }
+
+    /**
+     * Checks whether a parameter value should be masked, combining the global
+     * {@link SensitiveDataFilter} with the method-level {@code @AutoLog.sensitiveParams}.
+     */
+    private boolean isSensitive(String paramName, Object paramValue, LogContext context) {
+        if (sensitiveFilter.isSensitive(paramName, paramValue, context.getMethod())) {
+            return true;
+        }
+        String[] annotationParams = context.getSensitiveParams();
+        if (annotationParams != null && annotationParams.length > 0) {
+            for (String sp : annotationParams) {
+                if (sp != null && sp.equals(paramName)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // ---- Safe toString ----
+
+    /**
+     * Converts an arbitrary object to a string representation and appends it
+     * to the builder, with the following safety guarantees:
+     * <ul>
+     *   <li>{@code null} → {@code "null"}</li>
+     *   <li>Arrays → meaningful representation via {@link Arrays#toString}
+     *       (instead of the useless default {@code [Ljava.lang.Object;@hash})</li>
+     *   <li>{@code toString()} exceptions are caught → {@code [toString error: ...]}</li>
+     *   <li>Output is truncated at {@code maxLen} characters</li>
+     * </ul>
+     */
+    private static void appendSafeString(StringBuilder sb, Object obj, int maxLen) {
+        if (obj == null) {
             sb.append("null");
             return;
         }
-        String s = String.valueOf(result);
-        if (s.length() > 500) {
-            sb.append(s, 0, 500).append("...");
+        String s;
+        try {
+            if (obj.getClass().isArray()) {
+                s = arrayToString(obj);
+            } else {
+                s = obj.toString();
+            }
+        } catch (Exception e) {
+            s = "[toString error: " + e.getClass().getSimpleName() + "]";
+        }
+        if (s.length() > maxLen) {
+            sb.append(s, 0, maxLen).append("...");
         } else {
             sb.append(s);
         }
+    }
+
+    /**
+     * Converts a primitive or object array to a readable string.
+     * Large arrays ({@code byte[]}, {@code char[]}) only show their length
+     * to avoid flooding the log.
+     */
+    private static String arrayToString(Object array) {
+        if (array instanceof Object[]) return Arrays.toString((Object[]) array);
+        if (array instanceof int[])     return Arrays.toString((int[]) array);
+        if (array instanceof long[])    return Arrays.toString((long[]) array);
+        if (array instanceof double[])  return Arrays.toString((double[]) array);
+        if (array instanceof float[])   return Arrays.toString((float[]) array);
+        if (array instanceof short[])   return Arrays.toString((short[]) array);
+        if (array instanceof boolean[]) return Arrays.toString((boolean[]) array);
+        if (array instanceof byte[])    return "[byte[" + ((byte[]) array).length + "]]";
+        if (array instanceof char[])    return "[char[" + ((char[]) array).length + "]]";
+        return "[array]";
     }
 
     /**

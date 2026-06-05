@@ -25,6 +25,9 @@ public class LogContext {
     /** Shared empty array for excludeTypes. */
     private static final Class<?>[] EMPTY_EXCLUDE_TYPES = new Class<?>[0];
 
+    /** Shared empty array for sensitiveParams. */
+    private static final String[] EMPTY_SENSITIVE_PARAMS = new String[0];
+
     /** Fully qualified class name where the annotated method resides. */
     private String className;
 
@@ -79,6 +82,12 @@ public class LogContext {
     /** Trace ID for distributed tracing, resolved via {@code TraceIdProvider}. */
     private String traceId;
 
+    /** SpEL condition expression from @AutoLog.condition(). */
+    private String condition;
+
+    /** Parameter names to mask from @AutoLog.sensitiveParams(). */
+    private String[] sensitiveParams;
+
     /**
      * Extra attributes for custom formatters. Lazily initialised on first
      * call to {@link #addAttribute} — the vast majority of invocations
@@ -108,7 +117,8 @@ public class LogContext {
                       Class<?>[] excludeTypes, String operator, String traceId) {
         reset(className, methodName, method, args,
                 logArgs, logResult, logTime, logException,
-                level, messageTemplate, excludeTypes, operator, traceId);
+                level, messageTemplate, excludeTypes, operator, traceId,
+                "true", null);
     }
 
     /**
@@ -118,7 +128,8 @@ public class LogContext {
     public void reset(String className, String methodName, Method method, Object[] args,
                       boolean logArgs, boolean logResult, boolean logTime,
                       boolean logException, String level, String messageTemplate,
-                      Class<?>[] excludeTypes, String operator, String traceId) {
+                      Class<?>[] excludeTypes, String operator, String traceId,
+                      String condition, String[] sensitiveParams) {
         this.className = className;
         this.methodName = methodName;
         this.method = method;
@@ -132,6 +143,8 @@ public class LogContext {
         this.excludeTypes = excludeTypes != null ? excludeTypes.clone() : EMPTY_EXCLUDE_TYPES;
         this.operator = operator != null ? operator : "system";
         this.traceId = traceId != null ? traceId : "";
+        this.condition = condition != null ? condition : "true";
+        this.sensitiveParams = sensitiveParams != null ? sensitiveParams : EMPTY_SENSITIVE_PARAMS;
         this.startTime = Instant.now();
         this.status = ExecutionStatus.RUNNING;
         this.endTime = null;
@@ -162,6 +175,8 @@ public class LogContext {
         this.excludeTypes = EMPTY_EXCLUDE_TYPES;
         this.operator = "system";
         this.traceId = "";
+        this.condition = "true";
+        this.sensitiveParams = EMPTY_SENSITIVE_PARAMS;
         if (attributes != null) {
             attributes.clear();
         }
@@ -290,6 +305,14 @@ public class LogContext {
 
     public String getTraceId() {
         return traceId;
+    }
+
+    public String getCondition() {
+        return condition;
+    }
+
+    public String[] getSensitiveParams() {
+        return sensitiveParams;
     }
 
     /**
