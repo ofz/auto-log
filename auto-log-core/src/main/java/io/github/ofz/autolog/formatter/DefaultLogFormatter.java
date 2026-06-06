@@ -9,6 +9,9 @@ import org.springframework.expression.spel.support.StandardEvaluationContext;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.Map;
 
 /**
  * Default {@link LogFormatter} implementation.
@@ -252,8 +255,13 @@ public class DefaultLogFormatter implements LogFormatter {
      * to the builder, with the following safety guarantees:
      * <ul>
      *   <li>{@code null} → {@code "null"}</li>
+     *   <li>{@link CharSequence} → zero-copy append with truncation
+     *       (avoids intermediate String allocation)</li>
      *   <li>Arrays → meaningful representation via {@link Arrays#toString}
      *       (instead of the useless default {@code [Ljava.lang.Object;@hash})</li>
+     *   <li>{@link Collection} → size summary + truncated content preview,
+     *       avoiding full iteration over large collections</li>
+     *   <li>{@link Map} → size summary ({@code HashMap[size=100]})</li>
      *   <li>{@code toString()} exceptions are caught → {@code [toString error: ...]}</li>
      *   <li>Output is truncated at {@code maxLen} characters</li>
      * </ul>
@@ -263,21 +271,101 @@ public class DefaultLogFormatter implements LogFormatter {
             sb.append("null");
             return;
         }
-        String s;
         try {
-            if (obj.getClass().isArray()) {
-                s = arrayToString(obj);
-            } else {
-                s = obj.toString();
+            if (obj instanceof CharSequence) {
+                CharSequence cs = (CharSequence) obj;
+                int len = Math.min(cs.length(), maxLen);
+                sb.append(cs, 0, len);
+                if (cs.length() > maxLen) {
+                    sb.append("...");
+                }
+                return;
             }
+            if (obj.getClass().isArray()) {
+                appendTruncated(sb, arrayToString(obj), maxLen);
+                return;
+            }
+            if (obj instanceof Collection) {
+                formatCollection(sb, (Collection<?>) obj, maxLen);
+                return;
+            }
+            if (obj instanceof Map) {
+                Map<?, ?> map = (Map<?, ?>) obj;
+                sb.append(map.getClass().getSimpleName()).append("[size=").append(map.size()).append(']');
+                return;
+            }
+            // Fallback: standard toString()
+            appendTruncated(sb, obj.toString(), maxLen);
         } catch (Exception e) {
-            s = "[toString error: " + e.getClass().getSimpleName() + "]";
+            sb.append("[toString error: ").append(e.getClass().getSimpleName()).append(']');
         }
+    }
+
+    /**
+     * Appends up to {@code maxLen} characters of {@code s} to the builder,
+     * appending {@code "..."} if the string was trimmed.
+     */
+    private static void appendTruncated(StringBuilder sb, String s, int maxLen) {
         if (s.length() > maxLen) {
             sb.append(s, 0, maxLen).append("...");
         } else {
             sb.append(s);
         }
+    }
+
+    /**
+     * Formats a {@link Collection} as a compact summary:
+     * {@code ArrayList[size=1000, [a, b, c...]]}, truncated to {@code maxLen}
+     * characters. The size hint is always included; content preview is
+     * trimmed to fit within the remaining budget.
+     */
+    private static void formatCollection(StringBuilder sb, Collection<?> coll, int maxLen) {
+        // header: "ArrayList[size=42"
+        String header = coll.getClass().getSimpleName() + "[size=" + coll.size();
+        sb.append(header);
+
+        if (coll.isEmpty()) {
+            sb.append("]]");
+            return;
+        }
+
+        // Content preview: ", [elem1, elem2, ...]"
+        int used = sb.length();
+        int remaining = maxLen - (used + 4); // reserve room for trailing ", ]]"
+        if (remaining <= 0) {
+            sb.append("...]]");
+            return;
+        }
+
+        sb.append(", [");
+        int contentStart = sb.length();
+        int budget = remaining;
+
+        Iterator<?> it = coll.iterator();
+        boolean first = true;
+        while (it.hasNext() && budget > 0) {
+            String elem = String.valueOf(it.next());
+            int overhead = first ? 0 : 2; // ", "
+            if (elem.length() + overhead > budget) {
+                // Partial element: append what fits
+                if (!first) {
+                    sb.append(", ");
+                }
+                sb.append(elem, 0, budget);
+                budget = 0;
+                break;
+            }
+            if (!first) {
+                sb.append(", ");
+            }
+            sb.append(elem);
+            budget -= (elem.length() + overhead);
+            first = false;
+        }
+        if (it.hasNext() || sb.length() - contentStart > remaining) {
+            sb.append("...");
+        }
+        sb.append("]]");
     }
 
     /**

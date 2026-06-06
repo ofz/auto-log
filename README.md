@@ -13,7 +13,7 @@
 - **SpEL 条件** — `condition` 表达式控制是否记录
 - **慢调用检测** — 超过阈值自动升级为 WARN，无需接 APM
 - **双层敏感过滤** — 全局 `SensitiveDataFilter` SPI + 注解级 `sensitiveParams`
-- **安全序列化** — `toString()` 异常兜底、数组感知输出、参数/返回值截断
+- **类型感知序列化** — 按对象类型智能选择序列化策略：`CharSequence` 零拷贝输出、`Collection` 展示 size+预览、`Map` 展示 size 摘要、数组感知输出、`toString()` 异常兜底、参数/返回值截断
 - **可插拔 SPI** — `OperatorProvider` · `TraceIdProvider` · `AttributeProvider` · `SensitiveDataFilter` · `LogFormatter`
 - **优雅停机** — 10s 超时 + halt 兜底，无线程泄漏
 - **指标监控** — `auto-log-metrics` 模块，Micrometer / SLF4J 双通道
@@ -237,6 +237,23 @@ auto:
 | `SLEEPING` | 中 | 中 | 平衡 |
 | `YIELDING` | 较低 | 高 | 低延迟 |
 | `BUSY_SPIN` | 最低 | 最高 | 极致低延迟 |
+
+---
+
+## 序列化规则
+
+`appendSafeString` 根据对象运行时类型自动选择最优序列化策略，所有输出均受 `max-arg-length` / `max-result-length` 截断保护。
+
+| 对象类型 | 策略 | 输出示例 | 说明 |
+|---|---|---|---|
+| `null` | 直接输出 | `null` | |
+| `CharSequence` | 零拷贝截断 | `Hello World...` | 就地 `StringBuilder.append(CharSequence, 0, len)`，无中间 String 分配 |
+| 数组 | `Arrays.toString()` | `[1, 2, 3]` / `[byte[1024]]` | 原语数组展示完整内容，`byte[]` / `char[]` 仅展示长度 |
+| `Collection` | size + 截断预览 | `ArrayList[size=1000, [a, b, c...]]` | 始终展示 size，内容预览按字符预算逐元素截断，不触发全量迭代 |
+| `Map` | size 摘要 | `HashMap[size=42]` | 避免遍历所有 Entry 导致日志膨胀 |
+| 其他对象 | `toString()` | `User{id=1, name=admin}` | 常规 POJO 走 `toString()`，异常时输出 `[toString error: ...]` |
+
+> **提示：** 对于值对象（VO/DTO），推荐始终重写 `toString()` 以获得最佳日志可读性。未重写 `toString()` 的类将输出 `com.example.Foo@6d06d69c`，排查问题价值有限。
 
 ---
 
