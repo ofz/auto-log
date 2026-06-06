@@ -4,6 +4,8 @@ import io.github.ofz.autolog.context.LogContext;
 import io.github.ofz.autolog.provider.DefaultSensitiveDataFilter;
 import io.github.ofz.autolog.provider.SensitiveDataFilter;
 
+import org.springframework.expression.spel.support.StandardEvaluationContext;
+
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.util.Arrays;
@@ -35,66 +37,88 @@ public class DefaultLogFormatter implements LogFormatter {
 
     private static final String MASKED_VALUE = "***";
 
-    /** Maximum length of a single argument's {@code toString()} output before truncation. */
-    private static final int MAX_ARG_LENGTH = 200;
-
-    /** Maximum length of the result's {@code toString()} output before truncation. */
-    private static final int MAX_RESULT_LENGTH = 500;
-
     private final SensitiveDataFilter sensitiveFilter;
+    private final TemplateCompiler compiler = new TemplateCompiler();
+    private final int maxArgLength;
+    private final int maxResultLength;
 
     /**
-     * Creates a formatter with the default {@link SensitiveDataFilter}.
+     * Creates a formatter with defaults (maxArgLength=200, maxResultLength=500).
      */
     public DefaultLogFormatter() {
         this(new DefaultSensitiveDataFilter());
     }
 
     /**
-     * Creates a formatter with the given {@link SensitiveDataFilter}.
-     *
-     * @param sensitiveFilter the filter to use for masking sensitive parameter values
+     * Creates a formatter with the given filter and default truncation lengths.
      */
     public DefaultLogFormatter(SensitiveDataFilter sensitiveFilter) {
+        this(sensitiveFilter, 200, 500);
+    }
+
+    /**
+     * Creates a formatter with full configuration.
+     *
+     * @param sensitiveFilter the sensitive-data filter
+     * @param maxArgLength    max length of a single argument value (characters)
+     * @param maxResultLength max length of the return value (characters)
+     */
+    public DefaultLogFormatter(SensitiveDataFilter sensitiveFilter, int maxArgLength, int maxResultLength) {
         this.sensitiveFilter = sensitiveFilter != null ? sensitiveFilter : new DefaultSensitiveDataFilter();
+        this.maxArgLength = maxArgLength > 0 ? maxArgLength : 200;
+        this.maxResultLength = maxResultLength > 0 ? maxResultLength : 500;
     }
 
     @Override
     public String format(LogContext context) {
         String template = resolveTemplate(context);
+        CompiledTemplate compiled = compiler.compile(template);
         StringBuilder sb = new StringBuilder(template.length() + 256);
-        renderTemplate(sb, template, context);
+
+        StandardEvaluationContext spelCtx = null;
+        if (compiled.hasSpel) {
+            spelCtx = buildSpelContext(context);
+        }
+        for (TemplateSegment seg : compiled.segments) {
+            switch (seg.type) {
+                case LITERAL:
+                    sb.append(seg.text);
+                    break;
+                case PLACEHOLDER:
+                    appendPlaceholder(sb, seg.text, context);
+                    break;
+                case SPEL:
+                    try {
+                        Object val = seg.spelExpr.getValue(spelCtx);
+                        appendSafeString(sb, val, maxArgLength);
+                    } catch (Exception e) {
+                        sb.append("[spel error: ").append(e.getClass().getSimpleName()).append(']');
+                    }
+                    break;
+            }
+        }
         return sb.toString();
     }
 
     /**
-     * Renders the template into the given {@link StringBuilder} by scanning
-     * for {@code {placeholder}} tokens and resolving each one against the
-     * {@link LogContext}. Literal text between placeholders is appended
-     * directly — no intermediate strings are created.
+     * Builds a SpEL evaluation context populated with method parameters
+     * (keyed by name), the return value ({@code #result}), and the
+     * exception ({@code #exception}). Only called when the template
+     * contains at least one {@code #{...}} expression.
      */
-    private void renderTemplate(StringBuilder sb, String template, LogContext context) {
-        int pos = 0;
-        int len = template.length();
-        while (pos < len) {
-            int brace = template.indexOf('{', pos);
-            if (brace < 0) {
-                sb.append(template, pos, len);
-                return;
+    private StandardEvaluationContext buildSpelContext(LogContext context) {
+        StandardEvaluationContext evalCtx = new StandardEvaluationContext();
+        Object[] args = context.getArgs();
+        Method method = context.getMethod();
+        if (args != null && method != null) {
+            String[] paramNames = resolveParameterNames(method);
+            for (int i = 0; i < args.length && i < paramNames.length; i++) {
+                evalCtx.setVariable(paramNames[i], args[i]);
             }
-            // Append literal text before the brace
-            sb.append(template, pos, brace);
-            int endBrace = template.indexOf('}', brace + 1);
-            if (endBrace < 0) {
-                // Malformed — no closing brace; append the rest as-is
-                sb.append(template, brace, len - brace);
-                return;
-            }
-            // Resolve placeholder
-            String key = template.substring(brace + 1, endBrace);
-            appendPlaceholder(sb, key, context);
-            pos = endBrace + 1;
         }
+        evalCtx.setVariable("result", context.getResult());
+        evalCtx.setVariable("exception", context.getException());
+        return evalCtx;
     }
 
     /**
@@ -120,6 +144,9 @@ public class DefaultLogFormatter implements LogFormatter {
                 break;
             case "traceId":
                 sb.append(notEmpty(context.getTraceId()) ? context.getTraceId() : "-");
+                break;
+            case "slow":
+                sb.append(context.isSlow() ? "SLOW" : "");
                 break;
             case "args":
                 if (context.isLogArgs()) {
@@ -179,7 +206,7 @@ public class DefaultLogFormatter implements LogFormatter {
             if (isSensitive(paramName, args[i], context)) {
                 sb.append(MASKED_VALUE);
             } else {
-                appendSafeString(sb, args[i], MAX_ARG_LENGTH);
+                appendSafeString(sb, args[i], maxArgLength);
             }
             first = false;
         }
@@ -196,7 +223,7 @@ public class DefaultLogFormatter implements LogFormatter {
      * {@code StringBuilder} rather than string concatenation.
      */
     protected void formatResult(StringBuilder sb, Object result) {
-        appendSafeString(sb, result, MAX_RESULT_LENGTH);
+        appendSafeString(sb, result, maxResultLength);
     }
 
     /**

@@ -40,7 +40,14 @@ public class LogEventHandler implements EventHandler<LogEvent> {
             String message = formatter.format(ctx);
             Logger logger = LoggerFactory.getLogger(ctx.getClassName());
 
-            switch (ctx.getLevel().toUpperCase()) {
+            // Slow-call detection: upgrade level to WARN and increment counter.
+            boolean slow = ctx.isSlow();
+            if (slow) {
+                pool.incrementSlowCount();
+            }
+            String level = slow ? "WARN" : ctx.getLevel().toUpperCase();
+
+            switch (level) {
                 case "TRACE":
                     if (logger.isTraceEnabled()) {
                         logger.trace(message);

@@ -14,6 +14,7 @@
 
     <modules>
         <module>auto-log-core</module>
+        <module>auto-log-metrics</module>
         <module>auto-log-starter</module>
     </modules>
 

@@ -1,28 +1,27 @@
 # auto-log
 
-[![Maven Central](https://img.shields.io/maven-central/v/io.github.ofz/auto-log.svg)](https://search.maven.org/search?q=g:io.github.ofz%20AND%20a:auto-log)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+高性能 Spring Boot 自动日志框架，基于 [LMAX Disruptor](https://lmax-exchange.github.io/disruptor/) 异步管道。
 
-Auto-logging framework for Spring Boot powered by [LMAX Disruptor](https://lmax-exchange.github.io/disruptor/). 
+兼容 **Spring Boot 2.x / 3.x** · **JDK 8+**。
 
-Compatible with **Spring Boot 2.x / 3.x** and **JDK 8+**.
+## 特性
 
-## 特性 / Features
+- **异步非阻塞** — Disruptor RingBuffer 无锁写入，日志 IO 不阻塞业务线程
+- **对象池** — LogContext 稳态零分配，低 Young GC
+- **零拷贝模板引擎** — 预编译 + 缓存 + 单 pass StringBuilder 渲染
+- **SpEL 模板** — `#{#paramName}` 嵌入参数值，`#{#result}` 引用返回值
+- **SpEL 条件** — `condition` 表达式控制是否记录
+- **慢调用检测** — 超过阈值自动升级为 WARN，无需接 APM
+- **双层敏感过滤** — 全局 `SensitiveDataFilter` SPI + 注解级 `sensitiveParams`
+- **安全序列化** — `toString()` 异常兜底、数组感知输出、参数/返回值截断
+- **可插拔 SPI** — `OperatorProvider` · `TraceIdProvider` · `AttributeProvider` · `SensitiveDataFilter` · `LogFormatter`
+- **优雅停机** — 10s 超时 + halt 兜底，无线程泄漏
+- **指标监控** — `auto-log-metrics` 模块，Micrometer / SLF4J 双通道
+- **Spring Boot 2.x / 3.x 兼容** — 零 `javax`/`jakarta` 依赖
 
-- 🏷️ **声明式注解** `@AutoLog` —— 一行注解即可记录方法调用日志，支持类级别和方法级别
-- ⚡ **异步高性能** —— 基于 LMAX Disruptor 无锁环形缓冲区，零 GC 压力
-- 🎨 **日志格式可定制** —— 支持占位符模板 `{class}`, `{method}`, `{args}`, `{result}`, `{time}`, `{status}`, `{operator}`, `{traceId}`
-- 📋 **参数名自动映射** —— 日志中 `参数名=值` 一一对应（基于 `-parameters` 编译标志）
-- 🚫 **类型排除** —— 通过 `excludeTypes` 排除 `HttpServletRequest` 等框架对象
-- 👤 **操作人追踪** —— 可插拔 `OperatorProvider`，默认输出 `system`，支持对接 Spring Security 等
-- 🔗 **调用链追踪** —— 可插拔 `TraceIdProvider`，默认从 MDC 读取，无缝对接 Sleuth/SkyWalking
-- 🔌 **Spring Boot 自动装配** —— 兼容 Spring Boot 2.x / 3.x，引入 starter 即可使用
-- 🛡️ **优雅降级** —— Ring Buffer 满时自动 fallback 到同步日志
-- 📦 **模块化设计** —— `auto-log-core` 核心库 + `auto-log-starter` 自动装配
+## 快速开始
 
-## 快速开始 / Quick Start
-
-### 1. Maven 依赖
+### 1. 引入依赖
 
 ```xml
 <dependency>
@@ -32,196 +31,246 @@ Compatible with **Spring Boot 2.x / 3.x** and **JDK 8+**.
 </dependency>
 ```
 
-### 2. 使用注解
+### 2. 添加注解
 
 ```java
 @Service
 public class UserService {
 
-    // 基础用法：自动拼接参数名和值
-    @AutoLog(value = "用户登录: {method} | 耗时 {time}ms")
+    @AutoLog("用户登录: {method}")
     public User login(String username, String password) {
-        // 日志输出: username=admin, password=***
         return user;
-    }
-
-    // 不记录参数和返回值
-    @AutoLog(logArgs = false, logResult = false)
-    public String generateToken(User user) {
-        return token;
-    }
-
-    // 排除框架对象
-    @AutoLog(excludeTypes = {HttpServletRequest.class, HttpServletResponse.class})
-    public Result handle(HttpServletRequest req, HttpServletResponse res, String userId) {
-        return result;
     }
 }
 ```
 
-### 3. 输出示例
-
+输出：
 ```
-[AutoLog] system | - | com.example.UserService#login | SUCCESS | 12ms | args=[username=admin, password=***] | result=User{id=1, name='admin'}
-[AutoLog] admin | abc123 | com.example.UserService#handle | SUCCESS | 5ms | args=[userId=xxx] | result=Result{code=200}
-[AutoLog] system | - | com.example.UserService#validate | FAILURE | 2ms | args=[input=invalid_input] | result=ValidationException
+[AutoLog] system | - | com.example.UserService#login | SUCCESS | 12ms | args=[username=admin, password=***] | result=User{id=1}
 ```
 
-## 注解属性 / Annotation Attributes
+### 3. 指标监控（可选）
+
+```xml
+<dependency>
+    <groupId>io.github.ofz</groupId>
+    <artifactId>auto-log-metrics</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+有 Actuator → 自动对接 Prometheus/Grafana。无 Actuator → 每 60s 打一行 INFO 汇总。
+
+---
+
+## 注解属性
 
 | 属性 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `value()` | `String` | `""` | 自定义模板，支持 8 种占位符：`{class}` `{method}` `{args}` `{result}` `{time}` `{status}` `{operator}` `{traceId}` |
-| `logArgs()` | `boolean` | `true` | 是否记录参数，关闭后显示 `[filtered]` |
-| `logResult()` | `boolean` | `true` | 是否记录返回值，关闭后显示 `[filtered]` |
-| `logTime()` | `boolean` | `true` | 是否记录执行耗时 |
-| `logException()` | `boolean` | `true` | 是否在发生异常时记录异常详情 |
-| `level()` | `String` | `"INFO"` | 日志级别：`TRACE` / `DEBUG` / `INFO` / `WARN` / `ERROR` |
-| `excludeTypes()` | `Class<?>[]` | `{}` | 排除的参数类型数组，不参与日志拼接 |
+|---|---|---|---|
+| `value()` | `String` | `""` | 自定义消息模板 |
+| `level()` | `String` | `"INFO"` | 日志级别：TRACE / DEBUG / INFO / WARN / ERROR |
+| `logArgs()` | `boolean` | `true` | 是否记录入参 |
+| `logResult()` | `boolean` | `true` | 是否记录返回值 |
+| `logTime()` | `boolean` | `true` | 是否记录耗时 |
+| `logException()` | `boolean` | `true` | 是否记录异常 |
+| `excludeTypes()` | `Class<?>[]` | `{}` | 按类型排除参数（如 HttpServletRequest） |
+| `condition()` | `String` | `"true"` | SpEL 条件表达式，false 则跳过 |
+| `sensitiveParams()` | `String[]` | `{}` | 注解级敏感参数名，值显示为 `***` |
+| `slowThresholdMs()` | `long` | `0` | 慢调用阈值（ms），超过升级为 WARN，0=关闭 |
 
-### 参数名映射
+### 注解合并规则
 
-默认使用 `-parameters` 编译标志从字节码中提取真实参数名，输出格式为 `参数名=值, 参数名=值`。如果未开启 `-parameters`，回退为 `arg0=值, arg1=值`。
+`@AutoLog` 可放在类和方法上，同时存在时：
 
-### `excludeTypes` 类型排除
+| 属性 | 规则 |
+|---|---|
+| `value()` | 方法非空 > 类非空 > `""` |
+| `excludeTypes()` | 方法非空 > 类非空 > `{}` |
+| `sensitiveParams()` | **类 + 方法合并**（叠加） |
+| `condition()` `level()` `slowThresholdMs()` | **方法覆盖类** |
+| 布尔型（`logArgs` 等） | **方法覆盖类** |
 
-适用于 Controller 层排除 `HttpServletRequest`、`HttpServletResponse`、`MultipartFile` 等框架注入对象，避免日志中出现无意义的 `toString()` 输出。
+---
+
+## 模板语法
+
+### 框架占位符
+
+| 占位符 | 说明 |
+|---|---|
+| `{class}` | 全限定类名 |
+| `{method}` | 方法名 |
+| `{args}` | 方法入参（`paramName=value, ...`） |
+| `{result}` | 返回值 |
+| `{time}` | 执行耗时（ms） |
+| `{status}` | SUCCESS / FAILURE |
+| `{operator}` | 操作人 |
+| `{traceId}` | 调用链 ID |
+| `{slow}` | 慢调用时输出 `SLOW`，否则空 |
+
+### SpEL 表达式
+
+用 `#{#expression}` 嵌入动态值，预编译 + 缓存，仅在含 `#{...}` 的模板中激活：
+
+```java
+@AutoLog("用户 #{#username} 调用 {method}，结果 #{#result != null ? '成功' : '失败'}")
+@AutoLog("金额 #{#amount > 1000 ? 'HIGH' : 'NORMAL'}，耗时 {time}ms")
+```
+
+可用的 SpEL 变量：`#参数名`（所有方法参数）、`#result`、`#exception`。
+
+---
+
+## 使用示例
+
+### 慢调用检测
+
+```java
+@AutoLog(value = "查询订单", slowThresholdMs = 500)
+public Order queryOrder(String orderId) { ... }
+// 超过 500ms → 自动升级为 WARN，SLF4J 输出 [AutoLog] SLOW ...
+```
+
+### SpEL 条件
+
+```java
+// 仅记录有返回值的情况
+@AutoLog(condition = "#result != null")
+
+// 跳过 admin 操作
+@AutoLog(condition = "#username != 'admin'")
+
+// 仅记录异常
+@AutoLog(condition = "#exception != null")
+```
+
+### 敏感数据过滤
+
+```java
+// 注解级精确匹配
+@AutoLog(sensitiveParams = {"creditCard", "ssn"})
+public void pay(String creditCard, String ssn, BigDecimal amount) { ... }
+// 输出: creditCard=***, ssn=***, amount=100.00
+```
+
+```yaml
+# 全局关键词匹配（同 auto.log.sensitive-keywords）
+auto:
+  log:
+    sensitive-keywords: phone,idCard,address
+```
+
+### 排除框架对象
 
 ```java
 @AutoLog(excludeTypes = {HttpServletRequest.class, HttpServletResponse.class})
-public Result save(HttpServletRequest req, HttpServletResponse res,
-                   @RequestBody UserDto dto) {
-    // 日志仅输出 dto=UserDto{name=...}，req/res 被排除
+public Result save(HttpServletRequest req, HttpServletResponse res, @RequestBody UserDto dto) {
+    // 日志仅输出 dto=UserDto{...}，req/res 被跳过
 }
 ```
 
-类型匹配使用 `Class.isInstance()`（支持子类），即排除 `excludeTypes = {InputStream.class}` 时，`FileInputStream`、`ByteArrayInputStream` 等也会被排除。
+### before 钩子（查旧值快照）
 
-## 配置 / Configuration
+```java
+@Component
+public class AuditSnapshotProvider implements AttributeProvider {
+    @Autowired private UserMapper userMapper;
 
-在 `application.yml` 中配置：
+    @Override
+    public Map<String, Object> getAttributes(Method m, Object[] args, Class<?> cls) {
+        Map<String, Object> attrs = new HashMap<>();
+        if (args.length > 0 && args[0] instanceof Long) {
+            User old = userMapper.findById((Long) args[0]);
+            if (old != null) attrs.put("before", old);
+        }
+        return attrs;
+    }
+}
+```
+
+---
+
+## SPI 扩展点
+
+| 接口 | 作用 | 默认实现 |
+|---|---|---|
+| `OperatorProvider` | 获取当前操作人 | `"system"` |
+| `TraceIdProvider` | 获取调用链 ID | 读 MDC 的 `traceId` 键 |
+| `AttributeProvider` | 注入自定义属性（含 method/args 上下文） | 空 Map |
+| `SensitiveDataFilter` | 判断参数是否敏感 | 16 个内置关键词 |
+| `LogFormatter` | 完全控制日志格式 | `DefaultLogFormatter` |
+
+全部是 `@FunctionalInterface`，注册一个 Spring Bean 即可替换。
+
+```java
+@Component
+public class MyOperatorProvider implements OperatorProvider {
+    public String getOperator() {
+        return SecurityContextHolder.getContext().getAuthentication().getName();
+    }
+}
+```
+
+---
+
+## 配置
 
 ```yaml
 auto:
   log:
-    enabled: true              # 是否启用，默认 true
-    ring-buffer-size: 2048     # Ring Buffer 大小（自动向上取整为 2 的幂）
-    wait-strategy: BLOCKING    # 等待策略: BLOCKING | SLEEPING | YIELDING | BUSY_SPIN
-    producer-type: MULTI       # 生产者类型: SINGLE | MULTI
-    thread-name-prefix: log-   # 消费者线程名前缀
-    level: INFO                # 默认日志级别
+    enabled: true
+    ring-buffer-size: 2048          # RingBuffer 大小，自动取 2 的幂
+    wait-strategy: BLOCKING         # BLOCKING | SLEEPING | YIELDING | BUSY_SPIN
+    producer-type: MULTI            # SINGLE | MULTI
+    thread-name-prefix: log-        # 消费者线程名前缀
+    level: INFO                     # 默认日志级别
+    sensitive-keywords: phone,ssn   # 全局敏感关键词（逗号分隔）
+    max-arg-length: 200             # 单个参数值最大长度，超出截断（0=不限制）
+    max-result-length: 500          # 返回值最大长度，超出截断（0=不限制）
 ```
 
-### Wait Strategy 选择
+### Wait Strategy
 
-| 策略 | 延迟 | CPU 占用 | 适用场景 |
-|------|------|---------|---------|
-| `BLOCKING` | 较高 | 低 | 通用场景（默认） |
-| `SLEEPING` | 中等 | 中等 | 平衡延迟与 CPU |
-| `YIELDING` | 较低 | 高 | 低延迟要求 |
+| 策略 | 延迟 | CPU | 场景 |
+|---|---|---|---|
+| `BLOCKING` | 较高 | 低 | 通用（默认） |
+| `SLEEPING` | 中 | 中 | 平衡 |
+| `YIELDING` | 较低 | 高 | 低延迟 |
 | `BUSY_SPIN` | 最低 | 最高 | 极致低延迟 |
 
-## 自定义日志格式 / Custom Formatter
+---
 
-实现 `LogFormatter` 接口并注册为 Spring Bean：
+## 指标监控
 
-```java
-@Component
-public class JsonLogFormatter implements LogFormatter {
-    private final ObjectMapper mapper = new ObjectMapper();
-
-    @Override
-    public String format(LogContext ctx) {
-        // 返回 JSON 格式日志
-        Map<String, Object> log = Map.of(
-            "class", ctx.getClassName(),
-            "method", ctx.getMethodName(),
-            "status", ctx.getStatus().name(),
-            "time_ms", ctx.getExecutionTimeMs()
-        );
-        return mapper.writeValueAsString(log);
-    }
-}
+```yaml
+auto:
+  log:
+    metrics:
+      enabled: true               # 默认 true
+      report-interval-ms: 60000   # SLF4J 报告间隔，0=关闭
 ```
 
-## 操作人 / Operator
+| 指标 | 类型 | 说明 |
+|---|---|---|
+| `autolog.pool.available` | Gauge | 池中可用对象数 |
+| `autolog.pool.miss` | Counter | 池耗尽新建次数 |
+| `autolog.pool.drop` | Counter | 归还时池满丢弃次数 |
+| `autolog.slow` | Counter | 慢调用次数 |
+| `autolog.ringbuffer.utilization` | Gauge | RingBuffer 利用率 |
 
-默认返回 `"system"`。实现 `OperatorProvider` 接口对接认证系统：
+---
 
-```java
-@Component
-public class SecurityOperatorProvider implements OperatorProvider {
-    public String getOperator() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        return auth != null ? auth.getName() : "anonymous";
-    }
-}
-```
-
-## 调用链追踪 / Trace ID
-
-默认从 SLF4J [MDC](https://www.slf4j.org/manual.html#mdc) 中读取 `"traceId"` 键，没有则日志中显示 `-`。与常见追踪框架的集成方式：
-
-**Sleuth / SkyWalking / OpenTelemetry** — 自动填充 MDC，无需额外配置。
-
-**手动设置**（Filter / Interceptor）：
-
-```java
-MDC.put("traceId", request.getHeader("X-Trace-Id"));
-try {
-    chain.doFilter(req, res);
-} finally {
-    MDC.remove("traceId");
-}
-```
-
-**自定义实现**（覆盖默认行为）：
-
-```java
-@Component
-public class SkyWalkingTraceIdProvider implements TraceIdProvider {
-    public String getTraceId() {
-        return TraceContext.traceId();  // 直接读 SkyWalking 上下文
-    }
-}
-```
-
-## 模块结构 / Module Structure
+## 模块结构
 
 ```
 auto-log/
-├── pom.xml                         # 父 POM（依赖管理）
-├── auto-log-core/                  # 核心模块
-│   └── src/main/java/io/github/ofz/autolog/
-│       ├── annotation/AutoLog.java         # @AutoLog 注解
-│       ├── aspect/AutoLogAspect.java       # AOP 切面
-│       ├── context/LogContext.java         # 日志上下文
-│       ├── disruptor/                      # Disruptor 基础设施
-│       │   ├── DisruptorConfig.java
-│       │   ├── LogEvent.java
-│       │   ├── LogEventFactory.java
-│       │   ├── LogEventHandler.java
-│       │   └── LogEventProducer.java
-│       ├── formatter/                      # 格式化器
-│       │   ├── LogFormatter.java
-│       │   └── DefaultLogFormatter.java
-│       └── provider/                        # 可插拔策略
-│           ├── OperatorProvider.java
-│           ├── DefaultOperatorProvider.java
-│           ├── TraceIdProvider.java
-│           └── DefaultTraceIdProvider.java
-└── auto-log-starter/               # Spring Boot Starter
-    └── src/main/
-        ├── java/io/github/ofz/autolog/autoconfigure/config/
-        │   ├── AutoLogAutoConfiguration.java   # 自动装配
-        │   └── AutoLogProperties.java          # 配置属性
-        └── resources/META-INF/
-            ├── spring.factories
-            ├── spring-configuration-metadata.json
-            └── spring/
-                └── org.springframework.boot.autoconfigure.AutoConfiguration.imports
+├── auto-log-core/           # 核心：注解、AOP、Disruptor、格式化、SPI
+├── auto-log-metrics/        # 指标：Micrometer + SLF4J 采集器
+└── auto-log-starter/        # 自动装配：AutoConfiguration、配置属性
 ```
+
+---
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) for details.
+Apache License 2.0

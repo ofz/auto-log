@@ -1,5 +1,6 @@
 package io.github.ofz.autolog.provider;
 
+import java.lang.reflect.Method;
 import java.util.Map;
 
 /**
@@ -50,4 +51,41 @@ public interface AttributeProvider {
      * @return a map of attribute key-value pairs, never null
      */
     Map<String, Object> getAttributes();
+
+    /**
+     * Returns extra attributes with access to the intercepted method context.
+     * Called before method execution (same timing as the no-arg variant),
+     * but receives the method, its arguments, and the target class.
+     *
+     * <p>The default implementation delegates to {@link #getAttributes()}
+     * so existing implementations work without change.  Override this method
+     * when you need method arguments — for example, to query an "old value"
+     * snapshot from a database before the method mutates it.
+     *
+     * <h3>Before-hook example — audit snapshot</h3>
+     * <pre>{@code
+     * @Component
+     * public class AuditSnapshotProvider implements AttributeProvider {
+     *     @Autowired private UserMapper userMapper;
+     *
+     *     @Override
+     *     public Map<String, Object> getAttributes(Method m, Object[] args, Class<?> cls) {
+     *         Map<String, Object> attrs = new HashMap<>();
+     *         if (args.length > 0 && args[0] instanceof Long) {
+     *             User old = userMapper.findById((Long) args[0]);
+     *             if (old != null) attrs.put("before", old);
+     *         }
+     *         return attrs;
+     *     }
+     * }
+     * }</pre>
+     *
+     * @param method      the intercepted method
+     * @param args        method arguments (may be empty, never null)
+     * @param targetClass the class declaring the method
+     * @return a map of attribute key-value pairs, never null
+     */
+    default Map<String, Object> getAttributes(Method method, Object[] args, Class<?> targetClass) {
+        return getAttributes();
+    }
 }

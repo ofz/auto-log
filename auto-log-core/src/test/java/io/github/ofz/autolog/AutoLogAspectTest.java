@@ -397,6 +397,110 @@ class AutoLogAspectTest {
         assertTrue(message.contains("Hello World"));
     }
 
+    // ---- SpEL template tests ----
+
+    @Test
+    void testSpelTemplateParamReference() throws NoSuchMethodException {
+        Method method = TestService.class.getMethod("greet", String.class);
+        LogContext ctx = buildCtx(TestService.class, method,
+                new Object[]{"World"},
+                true, true, true, true, "INFO",
+                "Hello #{#name}");
+        ctx.markSuccess("result");
+
+        DefaultLogFormatter formatter = new DefaultLogFormatter();
+        String message = formatter.format(ctx);
+
+        // #{#name} should resolve to the argument value
+        assertTrue(message.contains("Hello World"));
+        assertFalse(message.contains("#{"));
+    }
+
+    @Test
+    void testSpelTemplateResultReference() throws NoSuchMethodException {
+        Method method = TestService.class.getMethod("greet", String.class);
+        LogContext ctx = buildCtx(TestService.class, method,
+                new Object[]{"World"},
+                true, true, true, true, "INFO",
+                "result was: #{#result}");
+        ctx.markSuccess("Hello World");
+
+        DefaultLogFormatter formatter = new DefaultLogFormatter();
+        String message = formatter.format(ctx);
+
+        assertTrue(message.contains("result was: Hello World"));
+    }
+
+    @Test
+    void testSpelTemplateTernaryExpression() throws NoSuchMethodException {
+        Method method = TestService.class.getMethod("greet", String.class);
+        LogContext ctx = buildCtx(TestService.class, method,
+                new Object[]{"World"},
+                true, true, true, true, "INFO",
+                "#{#name != null ? 'ok' : 'missing'}");
+        ctx.markSuccess(null);
+
+        DefaultLogFormatter formatter = new DefaultLogFormatter();
+        String message = formatter.format(ctx);
+
+        assertTrue(message.contains("ok"));
+    }
+
+    @Test
+    void testSpelTemplateMixedWithPlaceholders() throws NoSuchMethodException {
+        Method method = TestService.class.getMethod("greet", String.class);
+        LogContext ctx = buildCtx(TestService.class, method,
+                new Object[]{"World"},
+                true, true, true, true, "INFO",
+                "#{#name} -> {method} -> {status}");
+        ctx.markSuccess("ok");
+
+        DefaultLogFormatter formatter = new DefaultLogFormatter();
+        String message = formatter.format(ctx);
+
+        // Both SpEL and framework placeholders resolved
+        assertTrue(message.contains("World"));
+        assertTrue(message.contains("greet"));
+        assertTrue(message.contains("SUCCESS"));
+    }
+
+    @Test
+    void testSpelTemplateCacheHit() throws NoSuchMethodException {
+        // Same template used twice — compiler should cache
+        Method method = TestService.class.getMethod("greet", String.class);
+        LogContext ctx1 = buildCtx(TestService.class, method,
+                new Object[]{"Alice"}, true, true, true, true, "INFO", "Hi #{#name}");
+        ctx1.markSuccess(null);
+        LogContext ctx2 = buildCtx(TestService.class, method,
+                new Object[]{"Bob"}, true, true, true, true, "INFO", "Hi #{#name}");
+        ctx2.markSuccess(null);
+
+        DefaultLogFormatter formatter = new DefaultLogFormatter();
+        String msg1 = formatter.format(ctx1);
+        String msg2 = formatter.format(ctx2);
+
+        assertTrue(msg1.contains("Hi Alice"));
+        assertTrue(msg2.contains("Hi Bob"));
+    }
+
+    @Test
+    void testSpelTemplateNoSpelStillWorks() throws NoSuchMethodException {
+        // Template with only framework placeholders, no #{...} — zero overhead path
+        Method method = TestService.class.getMethod("greet", String.class);
+        LogContext ctx = buildCtx(TestService.class, method,
+                new Object[]{"World"}, true, true, true, true, "INFO",
+                "{class}#{method} | {status}"); // no #{...}
+        ctx.markSuccess(null);
+
+        DefaultLogFormatter formatter = new DefaultLogFormatter();
+        String message = formatter.format(ctx);
+
+        assertTrue(message.contains(TestService.class.getName()));
+        assertTrue(message.contains("greet"));
+        assertTrue(message.contains("SUCCESS"));
+        assertFalse(message.contains("#{"));
+    }
+
     // ---- Class-level @AutoLog tests ----
 
     @Test

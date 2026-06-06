@@ -25,9 +25,7 @@ import org.springframework.expression.spel.support.StandardEvaluationContext;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -58,7 +56,7 @@ public class AutoLogAspect {
     private final OperatorProvider operatorProvider;
     private final TraceIdProvider traceIdProvider;
     private final LogContextPool pool;
-    private final List<AttributeProvider> attributeProviders;
+    private final AttributeProvider attributeProvider;
 
     private final SpelExpressionParser spelParser = new SpelExpressionParser();
 
@@ -67,13 +65,13 @@ public class AutoLogAspect {
      */
     public AutoLogAspect(LogEventProducer producer, LogFormatter formatter,
                          OperatorProvider operatorProvider, TraceIdProvider traceIdProvider,
-                         LogContextPool pool, List<AttributeProvider> attributeProviders) {
+                         LogContextPool pool, AttributeProvider attributeProvider) {
         this.producer = producer;
         this.formatter = formatter;
         this.operatorProvider = operatorProvider;
         this.traceIdProvider = traceIdProvider;
         this.pool = pool;
-        this.attributeProviders = attributeProviders != null ? attributeProviders : Collections.emptyList();
+        this.attributeProvider = attributeProvider;
     }
 
     /**
@@ -81,7 +79,7 @@ public class AutoLogAspect {
      */
     public AutoLogAspect(LogEventProducer producer) {
         this(producer, new DefaultLogFormatter(), new DefaultOperatorProvider(),
-                new DefaultTraceIdProvider(), new LogContextPool(1024), Collections.emptyList());
+                new DefaultTraceIdProvider(), new LogContextPool(1024), null);
     }
 
     @Pointcut("@annotation(io.github.ofz.autolog.annotation.AutoLog)")
@@ -119,14 +117,14 @@ public class AutoLogAspect {
         fillLogContext(ctx, targetClass, method, joinPoint.getArgs(),
                 methodAnn, classAnn, operator, traceId);
 
-        // Collect extra attributes from all registered AttributeProviders
-        if (!attributeProviders.isEmpty()) {
-            for (AttributeProvider provider : attributeProviders) {
-                Map<String, Object> attrs = provider.getAttributes();
-                if (attrs != null && !attrs.isEmpty()) {
-                    for (Map.Entry<String, Object> entry : attrs.entrySet()) {
-                        ctx.addAttribute(entry.getKey(), entry.getValue());
-                    }
+        // Collect extra attributes from the AttributeProvider.
+        // Uses the 3-arg overload so the provider can access method context
+        // (e.g. to query DB for "before" snapshots using method arguments).
+        if (attributeProvider != null) {
+            Map<String, Object> attrs = attributeProvider.getAttributes(method, joinPoint.getArgs(), targetClass);
+            if (attrs != null && !attrs.isEmpty()) {
+                for (Map.Entry<String, Object> entry : attrs.entrySet()) {
+                    ctx.addAttribute(entry.getKey(), entry.getValue());
                 }
             }
         }
@@ -214,6 +212,14 @@ public class AutoLogAspect {
         }
         String[] sensitiveParams = sensitiveSet.toArray(new String[0]);
 
+        // slowThresholdMs: method wins, then class, then 0 (disabled)
+        long slowThresholdMs = 0;
+        if (methodAnn != null && methodAnn.slowThresholdMs() > 0) {
+            slowThresholdMs = methodAnn.slowThresholdMs();
+        } else if (classAnn != null && classAnn.slowThresholdMs() > 0) {
+            slowThresholdMs = classAnn.slowThresholdMs();
+        }
+
         ctx.reset(
                 targetClass.getName(),
                 method.getName(),
@@ -229,7 +235,8 @@ public class AutoLogAspect {
                 operator,
                 traceId,
                 condition,
-                sensitiveParams
+                sensitiveParams,
+                slowThresholdMs
         );
     }
 
@@ -341,7 +348,8 @@ public class AutoLogAspect {
         try {
             String message = formatter.format(ctx);
             Logger logger = LoggerFactory.getLogger(ctx.getClassName());
-            switch (ctx.getLevel().toUpperCase()) {
+            String level = ctx.isSlow() ? "WARN" : ctx.getLevel().toUpperCase();
+            switch (level) {
                 case "TRACE":
                     logger.trace(message);
                     break;

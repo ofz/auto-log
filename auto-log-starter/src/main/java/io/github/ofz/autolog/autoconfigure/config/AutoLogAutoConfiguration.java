@@ -26,7 +26,6 @@ import org.springframework.context.annotation.Configuration;
 
 import java.util.Arrays;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 /**
@@ -102,7 +101,7 @@ public class AutoLogAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean(SensitiveDataFilter.class)
-    public DefaultSensitiveDataFilter sensitiveDataFilter(AutoLogProperties properties) {
+    public SensitiveDataFilter sensitiveDataFilter(AutoLogProperties properties) {
         String raw = properties.getSensitiveKeywords();
         if (raw == null || raw.trim().isEmpty()) {
             return new DefaultSensitiveDataFilter();
@@ -121,8 +120,9 @@ public class AutoLogAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public LogFormatter logFormatter(SensitiveDataFilter sensitiveDataFilter) {
-        return new DefaultLogFormatter(sensitiveDataFilter);
+    public LogFormatter logFormatter(SensitiveDataFilter sensitiveDataFilter, AutoLogProperties properties) {
+        return new DefaultLogFormatter(sensitiveDataFilter,
+                properties.getMaxArgLength(), properties.getMaxResultLength());
     }
 
     /**
@@ -133,7 +133,7 @@ public class AutoLogAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean(AttributeProvider.class)
-    public DefaultAttributeProvider defaultAttributeProvider() {
+    public AttributeProvider defaultAttributeProvider() {
         return new DefaultAttributeProvider();
     }
 
@@ -143,9 +143,9 @@ public class AutoLogAutoConfiguration {
     public AutoLogAspect autoLogAspect(LogEventProducer producer, LogFormatter formatter,
                                        OperatorProvider operatorProvider, TraceIdProvider traceIdProvider,
                                        LogContextPool logContextPool,
-                                       List<AttributeProvider> attributeProviders) {
+                                       AttributeProvider attributeProvider) {
         return new AutoLogAspect(producer, formatter, operatorProvider, traceIdProvider,
-                logContextPool, attributeProviders);
+                logContextPool, attributeProvider);
     }
 
 }

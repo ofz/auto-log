@@ -43,6 +43,9 @@ public class LogContextPool {
     /** Number of releases dropped because the pool was full. */
     private final AtomicLong dropCount = new AtomicLong(0);
 
+    /** Number of slow invocations detected (exceeding slowThresholdMs). */
+    private final AtomicLong slowCount = new AtomicLong(0);
+
     /**
      * Creates a pool pre-allocated with {@code maxSize} empty LogContext instances.
      *
@@ -117,6 +120,16 @@ public class LogContextPool {
     /** Number of contexts dropped because the pool was full. */
     public long getDropCount() {
         return dropCount.get();
+    }
+
+    /** Number of slow invocations detected. */
+    public long getSlowCount() {
+        return slowCount.get();
+    }
+
+    /** Increments the slow-call counter. Called by the event handler. */
+    public void incrementSlowCount() {
+        slowCount.incrementAndGet();
     }
 
     /** Current number of available instances in the pool (approximate, O(1)). */

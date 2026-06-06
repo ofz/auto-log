@@ -72,6 +72,18 @@ public class AutoLogProperties {
      */
     private String sensitiveKeywords = "";
 
+    /**
+     * Maximum length of a single argument value in log output (characters).
+     * Longer values are truncated with "...". Default: 200.
+     */
+    private int maxArgLength = 200;
+
+    /**
+     * Maximum length of the method return value in log output (characters).
+     * Longer values are truncated with "...". Default: 500.
+     */
+    private int maxResultLength = 500;
+
     // ---- Getters and Setters ----
 
     public boolean isEnabled() {
@@ -129,4 +141,9 @@ public class AutoLogProperties {
     public void setSensitiveKeywords(String sensitiveKeywords) {
         this.sensitiveKeywords = sensitiveKeywords;
     }
+
+    public int getMaxArgLength() { return maxArgLength; }
+    public void setMaxArgLength(int maxArgLength) { this.maxArgLength = maxArgLength; }
+    public int getMaxResultLength() { return maxResultLength; }
+    public void setMaxResultLength(int maxResultLength) { this.maxResultLength = maxResultLength; }
 }

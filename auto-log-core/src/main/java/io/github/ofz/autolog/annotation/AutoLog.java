@@ -148,4 +148,20 @@ public @interface AutoLog {
      * <p>Example: {@code sensitiveParams = {"creditCard", "ssn"}}
      */
     String[] sensitiveParams() default {};
+
+    /**
+     * Slow-call threshold in milliseconds. When the method execution time
+     * exceeds this value the log level is automatically upgraded to
+     * {@code WARN} to make slow invocations stand out in monitoring.
+     *
+     * <p>Set to {@code 0} (the default) to disable. Typical values:
+     * <ul>
+     *   <li>HTTP API: {@code 500}–{@code 1000}</li>
+     *   <li>DB query: {@code 200}–{@code 500}</li>
+     *   <li>RPC call: {@code 1000}–{@code 3000}</li>
+     * </ul>
+     *
+     * <p>Merge rule: method-level value wins over class-level.
+     */
+    long slowThresholdMs() default 0;
 }

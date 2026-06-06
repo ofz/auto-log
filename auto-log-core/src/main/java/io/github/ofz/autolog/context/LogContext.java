@@ -88,6 +88,9 @@ public class LogContext {
     /** Parameter names to mask from @AutoLog.sensitiveParams(). */
     private String[] sensitiveParams;
 
+    /** Slow-call threshold in ms from @AutoLog.slowThresholdMs(). 0 = disabled. */
+    private long slowThresholdMs;
+
     /**
      * Extra attributes for custom formatters. Lazily initialised on first
      * call to {@link #addAttribute} — the vast majority of invocations
@@ -118,7 +121,7 @@ public class LogContext {
         reset(className, methodName, method, args,
                 logArgs, logResult, logTime, logException,
                 level, messageTemplate, excludeTypes, operator, traceId,
-                "true", null);
+                "true", null, 0);
     }
 
     /**
@@ -129,7 +132,7 @@ public class LogContext {
                       boolean logArgs, boolean logResult, boolean logTime,
                       boolean logException, String level, String messageTemplate,
                       Class<?>[] excludeTypes, String operator, String traceId,
-                      String condition, String[] sensitiveParams) {
+                      String condition, String[] sensitiveParams, long slowThresholdMs) {
         this.className = className;
         this.methodName = methodName;
         this.method = method;
@@ -145,6 +148,7 @@ public class LogContext {
         this.traceId = traceId != null ? traceId : "";
         this.condition = condition != null ? condition : "true";
         this.sensitiveParams = sensitiveParams != null ? sensitiveParams : EMPTY_SENSITIVE_PARAMS;
+        this.slowThresholdMs = slowThresholdMs;
         this.startTime = Instant.now();
         this.status = ExecutionStatus.RUNNING;
         this.endTime = null;
@@ -177,6 +181,7 @@ public class LogContext {
         this.traceId = "";
         this.condition = "true";
         this.sensitiveParams = EMPTY_SENSITIVE_PARAMS;
+        this.slowThresholdMs = 0;
         if (attributes != null) {
             attributes.clear();
         }
@@ -313,6 +318,22 @@ public class LogContext {
 
     public String[] getSensitiveParams() {
         return sensitiveParams;
+    }
+
+    public long getSlowThresholdMs() {
+        return slowThresholdMs;
+    }
+
+    /**
+     * Returns {@code true} when the slow-call threshold is configured
+     * and the execution time exceeds it.
+     */
+    public boolean isSlow() {
+        if (slowThresholdMs <= 0) {
+            return false;
+        }
+        long elapsed = getExecutionTimeMs();
+        return elapsed >= 0 && elapsed > slowThresholdMs;
     }
 
     /**

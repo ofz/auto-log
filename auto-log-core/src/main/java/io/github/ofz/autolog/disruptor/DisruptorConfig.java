@@ -75,6 +75,21 @@ public class DisruptorConfig {
         return producer;
     }
 
+    /** Ring buffer size (total slots). */
+    public long getRingBufferSize() {
+        return disruptor.getRingBuffer().getBufferSize();
+    }
+
+    /** Remaining capacity in the ring buffer. 0 = full. */
+    public long remainingCapacity() {
+        return disruptor.getRingBuffer().remainingCapacity();
+    }
+
+    /** Current cursor position (monotonically increasing sequence number). */
+    public long getCursor() {
+        return disruptor.getRingBuffer().getCursor();
+    }
+
     /**
      * Gracefully shuts down the Disruptor:
      * <ol>
